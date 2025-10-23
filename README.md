@@ -264,7 +264,7 @@ OrleansX/
 ### 사전 요구사항
 
 - .NET 9.0 SDK 이상
-- (옵션) PostgreSQL - 프로덕션 환경
+- (옵션) **데이터베이스** - SQL Server, PostgreSQL, MySQL 등 (프로덕션 환경)
 - (옵션) Redis - 캐싱/스트림
 - (옵션) Kafka - 이벤트 스트리밍
 
@@ -492,7 +492,7 @@ public class TransferGrain : Grain, ITransferGrain
 | **프레임워크** | .NET 9.0 |
 | **Orleans** | Microsoft Orleans 9.2.1 |
 | **트랜잭션** | Microsoft.Orleans.Transactions 9.2.1 🆕 |
-| **스토리지** | ADO.NET (PostgreSQL), Redis, Memory |
+| **스토리지** | ADO.NET (SQL Server, PostgreSQL, MySQL), Redis, Memory |
 | **스트림** | Memory, Kafka, Azure Event Hubs |
 | **테스트** | xUnit, Orleans.TestingHost |
 | **로깅** | Microsoft.Extensions.Logging |
