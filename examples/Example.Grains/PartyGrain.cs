@@ -3,225 +3,269 @@ using Example.Grains.Models;
 using Microsoft.Extensions.Logging;
 using Orleans;
 using Orleans.Runtime;
+using Orleans.Transactions.Abstractions;
 using OrleansX.Grains;
 
 namespace Example.Grains;
 
 /// <summary>
-/// 파티 Grain 구현
+/// 파티 Grain 구현 (트랜잭션 사용)
 /// </summary>
-public class PartyGrain : StatefulGrainBase<PartyState>, IPartyGrain
+public class PartyGrain : TransactionalGrainBase<PartyState>, IPartyGrain
 {
     public PartyGrain(
-        [PersistentState("party")] IPersistentState<PartyState> state,
-        ILogger<PartyGrain> logger) : base(state, logger)
+        [TransactionalState("party")] ITransactionalState<PartyState> state,
+        ILogger<PartyGrain> logger)
+        : base(state, logger)
     {
     }
 
-    public async Task<bool> CreateAsync(string leaderId, string leaderName, int maxMembers = 4)
+    [Transaction(TransactionOption.Create)]
+    public async Task CreateAsync(string leaderId, string leaderName, int leaderLevel, int leaderMmr, int maxMembers = 5)
     {
-        if (State.PartyId != null && !string.IsNullOrEmpty(State.PartyId))
+        await UpdateStateAsync(state =>
         {
-            Logger.LogWarning("Party already exists: {PartyId}", State.PartyId);
-            return false;
-        }
+            state.PartyId = this.GetPrimaryKeyString();
+            state.LeaderId = leaderId;
+            state.MaxMembers = maxMembers;
+            state.Status = PartyStatus.Waiting;
+            state.CreatedAt = DateTime.UtcNow;
+
+            // 리더를 첫 멤버로 추가
+            state.Members.Add(new PartyMember
+            {
+                PlayerId = leaderId,
+                PlayerName = leaderName,
+                Level = leaderLevel,
+                Mmr = leaderMmr,
+                JoinedAt = DateTime.UtcNow
+            });
+
+            state.AverageMmr = leaderMmr;
+        });
 
         var partyId = this.GetPrimaryKeyString();
-        State.PartyId = partyId;
-        State.LeaderId = leaderId;
-        State.MaxMembers = maxMembers;
-        State.Status = PartyStatus.Waiting;
-        State.CreatedAt = DateTimeOffset.UtcNow;
-        State.UpdatedAt = DateTimeOffset.UtcNow;
 
-        // 리더를 멤버로 추가
-        State.Members.Add(new PartyMember
-        {
-            PlayerId = leaderId,
-            PlayerName = leaderName,
-            Level = 1,
-            JoinedAt = DateTimeOffset.UtcNow
-        });
+        // 플레이어 상태 업데이트
+        var playerGrain = GrainFactory.GetGrain<IPlayerGrain>(leaderId);
+        await playerGrain.JoinPartyAsync(partyId);
 
-        await SaveStateAsync();
-        Logger.LogInformation("Party created: {PartyId} by {LeaderId}", partyId, leaderId);
-        return true;
+        Logger.LogInformation("Party created: {PartyId}, Leader: {LeaderId}",
+            partyId, leaderId);
     }
 
-    public async Task<bool> JoinAsync(string playerId, string playerName, int level)
+    public async Task<PartyState?> GetInfoAsync()
     {
-        if (State.PartyId == null || string.IsNullOrEmpty(State.PartyId))
+        try
         {
-            Logger.LogWarning("Party not found");
-            return false;
+            return await GetStateAsync();
         }
-
-        if (State.Status != PartyStatus.Waiting)
+        catch
         {
-            Logger.LogWarning("Party is not waiting: {Status}", State.Status);
-            return false;
+            return null;
         }
-
-        if (State.Members.Count >= State.MaxMembers)
-        {
-            Logger.LogWarning("Party is full");
-            return false;
-        }
-
-        if (State.Members.Any(m => m.PlayerId == playerId))
-        {
-            Logger.LogWarning("Player already in party: {PlayerId}", playerId);
-            return false;
-        }
-
-        State.Members.Add(new PartyMember
-        {
-            PlayerId = playerId,
-            PlayerName = playerName,
-            Level = level,
-            JoinedAt = DateTimeOffset.UtcNow
-        });
-
-        State.UpdatedAt = DateTimeOffset.UtcNow;
-        await SaveStateAsync();
-
-        Logger.LogInformation("Player joined party: {PlayerId} -> {PartyId}", playerId, State.PartyId);
-        return true;
     }
 
+    [Transaction(TransactionOption.Join)]
+    public async Task<bool> JoinAsync(string playerId, string playerName, int level, int mmr)
+    {
+        return await UpdateStateAsync(state =>
+        {
+            if (state.Members.Count >= state.MaxMembers)
+            {
+                Logger.LogWarning("Party {PartyId} is full", state.PartyId);
+                return false;
+            }
+
+            if (state.Members.Any(m => m.PlayerId == playerId))
+            {
+                Logger.LogWarning("Player {PlayerId} already in party {PartyId}", playerId, state.PartyId);
+                return false;
+            }
+
+            if (state.Status != PartyStatus.Waiting)
+            {
+                Logger.LogWarning("Party {PartyId} is not in Waiting status", state.PartyId);
+                return false;
+            }
+
+            state.Members.Add(new PartyMember
+            {
+                PlayerId = playerId,
+                PlayerName = playerName,
+                Level = level,
+                Mmr = mmr,
+                JoinedAt = DateTime.UtcNow
+            });
+
+            // 평균 MMR 재계산
+            state.AverageMmr = (int)state.Members.Average(m => m.Mmr);
+
+            Logger.LogInformation("Player {PlayerId} joined party {PartyId}", playerId, state.PartyId);
+            return true;
+        });
+    }
+
+    [Transaction(TransactionOption.Join)]
     public async Task<bool> LeaveAsync(string playerId)
     {
-        if (State.PartyId == null || string.IsNullOrEmpty(State.PartyId))
+        return await UpdateStateAsync(state =>
         {
-            return false;
-        }
-
-        var member = State.Members.FirstOrDefault(m => m.PlayerId == playerId);
-        if (member == null)
-        {
-            return false;
-        }
-
-        State.Members.Remove(member);
-        State.UpdatedAt = DateTimeOffset.UtcNow;
-
-        // 리더가 떠난 경우
-        if (playerId == State.LeaderId)
-        {
-            if (State.Members.Count > 0)
+            var member = state.Members.FirstOrDefault(m => m.PlayerId == playerId);
+            if (member == null)
             {
-                // 새로운 리더 지정 (첫 번째 멤버)
-                State.LeaderId = State.Members[0].PlayerId;
-                Logger.LogInformation("New party leader: {LeaderId}", State.LeaderId);
+                Logger.LogWarning("Player {PlayerId} not in party {PartyId}", playerId, state.PartyId);
+                return false;
             }
-            else
+
+            state.Members.Remove(member);
+
+            // 리더가 나간 경우
+            if (state.LeaderId == playerId)
             {
-                // 모든 멤버가 떠난 경우 파티 해산
-                State.Status = PartyStatus.Disbanded;
+                if (state.Members.Count > 0)
+                {
+                    // 첫 번째 멤버를 새 리더로
+                    state.LeaderId = state.Members[0].PlayerId;
+                    Logger.LogInformation("New leader for party {PartyId}: {NewLeaderId}",
+                        state.PartyId, state.LeaderId);
+                }
+                else
+                {
+                    // 마지막 멤버가 나가면 파티 해산
+                    state.Status = PartyStatus.Disbanded;
+                    Logger.LogInformation("Party {PartyId} disbanded (no members)", state.PartyId);
+                }
             }
-        }
 
-        await SaveStateAsync();
-        Logger.LogInformation("Player left party: {PlayerId} -> {PartyId}", playerId, State.PartyId);
-        return true;
-    }
+            // 평균 MMR 재계산
+            if (state.Members.Count > 0)
+            {
+                state.AverageMmr = (int)state.Members.Average(m => m.Mmr);
+            }
 
-    public async Task<bool> DisbandAsync(string requesterId)
-    {
-        if (State.PartyId == null || string.IsNullOrEmpty(State.PartyId))
-        {
-            return false;
-        }
-
-        if (requesterId != State.LeaderId)
-        {
-            Logger.LogWarning("Only leader can disband party: {RequesterId} != {LeaderId}", 
-                requesterId, State.LeaderId);
-            return false;
-        }
-
-        State.Status = PartyStatus.Disbanded;
-        State.UpdatedAt = DateTimeOffset.UtcNow;
-        await SaveStateAsync();
-
-        Logger.LogInformation("Party disbanded: {PartyId}", State.PartyId);
-        return true;
-    }
-
-    public Task<PartyState?> GetStateAsync()
-    {
-        if (State.PartyId == null || string.IsNullOrEmpty(State.PartyId))
-        {
-            return Task.FromResult<PartyState?>(null);
-        }
-
-        return Task.FromResult<PartyState?>(State);
+            Logger.LogInformation("Player {PlayerId} left party {PartyId}", playerId, state.PartyId);
+            return true;
+        });
     }
 
     public async Task<bool> StartMatchmakingAsync()
     {
-        if (State.PartyId == null || string.IsNullOrEmpty(State.PartyId))
+        var state = await GetStateAsync();
+
+        if (state.Status != PartyStatus.Waiting)
         {
+            Logger.LogWarning("Party {PartyId} cannot start matchmaking (status: {Status})",
+                state.PartyId, state.Status);
             return false;
         }
 
-        if (State.Status != PartyStatus.Waiting)
+        if (state.Members.Count == 0)
         {
-            Logger.LogWarning("Party is not waiting: {Status}", State.Status);
+            Logger.LogWarning("Party {PartyId} has no members", state.PartyId);
             return false;
         }
 
-        if (State.IsMatchmaking)
+        // 매칭 시스템에 큐 추가
+        var matchmakingGrain = GrainFactory.GetGrain<IMatchmakingGrain>("global");
+        await matchmakingGrain.EnqueuePartyAsync(
+            state.PartyId,
+            state.AverageMmr,
+            state.Members.Count,
+            state.Members.Select(m => m.PlayerId).ToList());
+
+        await UpdateStateAsync(s =>
         {
-            Logger.LogWarning("Party is already in matchmaking");
-            return false;
+            s.Status = PartyStatus.Matchmaking;
+            s.IsMatchmaking = true;
+        });
+
+        // 멤버들 상태 업데이트
+        foreach (var member in state.Members)
+        {
+            var playerGrain = GrainFactory.GetGrain<IPlayerGrain>(member.PlayerId);
+            await playerGrain.SetMatchStatusAsync(PlayerMatchStatus.Matchmaking);
         }
 
-        State.IsMatchmaking = true;
-        State.UpdatedAt = DateTimeOffset.UtcNow;
-        await SaveStateAsync();
-
-        // 매칭 큐에 등록
-        var matchmakingGrain = GrainFactory.GetGrain<IMatchmakingGrain>("default");
-        var averageRating = State.Members.Average(m => m.Level * 100); // 간단한 레이팅 계산
-        await matchmakingGrain.EnqueuePartyAsync(State.PartyId, (int)averageRating, State.Members.Count);
-
-        Logger.LogInformation("Party started matchmaking: {PartyId}", State.PartyId);
+        Logger.LogInformation("Party {PartyId} started matchmaking (MMR: {Mmr})",
+            state.PartyId, state.AverageMmr);
         return true;
     }
 
-    public async Task<bool> CancelMatchmakingAsync()
+    public async Task CancelMatchmakingAsync()
     {
-        if (State.PartyId == null || string.IsNullOrEmpty(State.PartyId))
+        var state = await GetStateAsync();
+
+        if (!state.IsMatchmaking)
         {
-            return false;
+            return;
         }
 
-        if (!State.IsMatchmaking)
+        var matchmakingGrain = GrainFactory.GetGrain<IMatchmakingGrain>("global");
+        await matchmakingGrain.DequeueAsync(state.PartyId);
+
+        await UpdateStateAsync(s =>
         {
-            return false;
+            s.Status = PartyStatus.Waiting;
+            s.IsMatchmaking = false;
+        });
+
+        // 멤버들 상태 업데이트
+        foreach (var member in state.Members)
+        {
+            var playerGrain = GrainFactory.GetGrain<IPlayerGrain>(member.PlayerId);
+            await playerGrain.SetMatchStatusAsync(PlayerMatchStatus.InParty);
         }
 
-        State.IsMatchmaking = false;
-        State.UpdatedAt = DateTimeOffset.UtcNow;
-        await SaveStateAsync();
-
-        // 매칭 큐에서 제거
-        var matchmakingGrain = GrainFactory.GetGrain<IMatchmakingGrain>("default");
-        await matchmakingGrain.DequeuePartyAsync(State.PartyId);
-
-        Logger.LogInformation("Party cancelled matchmaking: {PartyId}", State.PartyId);
-        return true;
+        Logger.LogInformation("Party {PartyId} cancelled matchmaking", state.PartyId);
     }
 
-    public async Task OnMatchFoundAsync(string matchId)
+    public async Task OnMatchFoundAsync(string roomId, string matchId)
     {
-        State.IsMatchmaking = false;
-        State.Status = PartyStatus.InGame;
-        State.UpdatedAt = DateTimeOffset.UtcNow;
-        await SaveStateAsync();
+        var state = await GetStateAsync();
 
-        Logger.LogInformation("Match found for party {PartyId}: {MatchId}", State.PartyId, matchId);
+        await UpdateStateAsync(s =>
+        {
+            s.Status = PartyStatus.InRoom;
+            s.IsMatchmaking = false;
+        });
+
+        // 멤버들을 룸에 입장시킴
+        foreach (var member in state.Members)
+        {
+            var playerGrain = GrainFactory.GetGrain<IPlayerGrain>(member.PlayerId);
+            await playerGrain.EnterRoomAsync(roomId);
+        }
+
+        Logger.LogInformation("Party {PartyId} matched! Room: {RoomId}, Match: {MatchId}",
+            state.PartyId, roomId, matchId);
+    }
+
+    [Transaction(TransactionOption.Join)]
+    public async Task DisbandAsync()
+    {
+        var state = await GetStateAsync();
+
+        // 매칭 중이면 취소
+        if (state.IsMatchmaking)
+        {
+            await CancelMatchmakingAsync();
+        }
+
+        // 모든 멤버 파티 탈퇴 처리
+        foreach (var member in state.Members.ToList())
+        {
+            var playerGrain = GrainFactory.GetGrain<IPlayerGrain>(member.PlayerId);
+            await playerGrain.LeavePartyAsync();
+        }
+
+        await UpdateStateAsync(s =>
+        {
+            s.Members.Clear();
+            s.Status = PartyStatus.Disbanded;
+        });
+
+        Logger.LogInformation("Party {PartyId} disbanded by leader", state.PartyId);
     }
 }
 

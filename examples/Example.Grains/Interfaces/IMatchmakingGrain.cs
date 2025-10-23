@@ -4,33 +4,39 @@ using Orleans;
 namespace Example.Grains.Interfaces;
 
 /// <summary>
-/// 매칭 메이킹 Grain 인터페이스
+/// 매칭메이킹 Grain 인터페이스
+/// (싱글톤 Grain - key는 "global")
 /// </summary>
 public interface IMatchmakingGrain : IGrainWithStringKey
 {
     /// <summary>
-    /// 파티를 매칭 큐에 추가합니다.
+    /// 개인 매칭 큐에 추가
     /// </summary>
-    Task<bool> EnqueuePartyAsync(string partyId, int averageRating, int partySize);
+    Task EnqueueSoloAsync(string playerId, int mmr);
 
     /// <summary>
-    /// 파티를 매칭 큐에서 제거합니다.
+    /// 파티 매칭 큐에 추가
     /// </summary>
-    Task<bool> DequeuePartyAsync(string partyId);
+    Task EnqueuePartyAsync(string partyId, int averageMmr, int playerCount, List<string> playerIds);
 
     /// <summary>
-    /// 매칭을 시도합니다.
+    /// 큐에서 제거
     /// </summary>
-    Task<string?> TryMatchAsync();
+    Task DequeueAsync(string id);
 
     /// <summary>
-    /// 현재 대기 중인 파티 수를 가져옵니다.
+    /// 매칭 시도
     /// </summary>
-    Task<int> GetQueueSizeAsync();
+    Task<List<CreatedMatch>> TryMatchAsync();
 
     /// <summary>
-    /// 매치 정보를 가져옵니다.
+    /// 큐 상태 조회
     /// </summary>
-    Task<MatchInfo?> GetMatchInfoAsync(string matchId);
+    Task<(int soloCount, int partyCount)> GetQueueStatusAsync();
+
+    /// <summary>
+    /// 매칭 히스토리 조회
+    /// </summary>
+    Task<List<CreatedMatch>> GetMatchHistoryAsync(int count = 10);
 }
 

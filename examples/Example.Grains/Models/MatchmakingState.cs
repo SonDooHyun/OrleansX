@@ -3,73 +3,104 @@ using Orleans;
 namespace Example.Grains.Models;
 
 /// <summary>
-/// 매칭 큐 상태
+/// 매칭메이킹 상태
 /// </summary>
 [GenerateSerializer]
 public class MatchmakingState
 {
     /// <summary>
-    /// 대기 중인 파티 목록 (PartyId, 레이팅)
+    /// 개인 매칭 큐 (PlayerId -> MatchRequest)
     /// </summary>
     [Id(0)]
-    public List<QueuedParty> QueuedParties { get; set; } = new();
+    public Dictionary<string, MatchRequest> SoloQueue { get; set; } = new();
 
     /// <summary>
-    /// 활성 매치 목록
+    /// 파티 매칭 큐 (PartyId -> MatchRequest)
     /// </summary>
     [Id(1)]
-    public Dictionary<string, MatchInfo> ActiveMatches { get; set; } = new();
+    public Dictionary<string, MatchRequest> PartyQueue { get; set; } = new();
+
+    /// <summary>
+    /// 생성된 매치 목록
+    /// </summary>
+    [Id(2)]
+    public List<CreatedMatch> Matches { get; set; } = new();
 
     /// <summary>
     /// 마지막 매칭 시도 시간
     /// </summary>
-    [Id(2)]
-    public DateTimeOffset LastMatchAttempt { get; set; } = DateTimeOffset.UtcNow;
+    [Id(3)]
+    public DateTime LastMatchAttempt { get; set; } = DateTime.UtcNow;
 }
 
 /// <summary>
-/// 대기 중인 파티
+/// 매칭 요청
 /// </summary>
 [GenerateSerializer]
-public class QueuedParty
+public class MatchRequest
 {
     [Id(0)]
-    public string PartyId { get; set; } = string.Empty;
+    public string Id { get; set; } = string.Empty; // PlayerId or PartyId
 
     [Id(1)]
-    public int AverageRating { get; set; }
+    public MatchType Type { get; set; }
 
     [Id(2)]
-    public int PartySize { get; set; }
+    public int AverageMmr { get; set; }
 
     [Id(3)]
-    public DateTimeOffset QueuedAt { get; set; } = DateTimeOffset.UtcNow;
+    public int PlayerCount { get; set; }
+
+    [Id(4)]
+    public List<string> PlayerIds { get; set; } = new();
+
+    [Id(5)]
+    public DateTime EnqueuedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// 대기 시간에 따른 MMR 범위 계산
+    /// </summary>
+    public int GetMmrRange()
+    {
+        var waitTime = DateTime.UtcNow - EnqueuedAt;
+        var baseRange = 100;
+        var expandedRange = (int)(waitTime.TotalSeconds / 10) * 50; // 10초마다 50 MMR 확장
+        return Math.Min(baseRange + expandedRange, 500); // 최대 500
+    }
 }
 
 /// <summary>
-/// 매치 정보
+/// 매칭 타입
 /// </summary>
 [GenerateSerializer]
-public class MatchInfo
+public enum MatchType
+{
+    [Id(0)] Solo,   // 개인 매칭
+    [Id(1)] Party   // 파티 매칭
+}
+
+/// <summary>
+/// 생성된 매치
+/// </summary>
+[GenerateSerializer]
+public class CreatedMatch
 {
     [Id(0)]
     public string MatchId { get; set; } = string.Empty;
 
     [Id(1)]
-    public List<string> PartyIds { get; set; } = new();
+    public string RoomId { get; set; } = string.Empty;
 
     [Id(2)]
-    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public List<string> TeamA { get; set; } = new();
 
     [Id(3)]
-    public MatchStatus Status { get; set; } = MatchStatus.Preparing;
-}
+    public List<string> TeamB { get; set; } = new();
 
-public enum MatchStatus
-{
-    Preparing,   // 준비 중
-    InProgress,  // 진행 중
-    Completed,   // 완료
-    Cancelled    // 취소됨
+    [Id(4)]
+    public int AverageMmr { get; set; }
+
+    [Id(5)]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

@@ -1,23 +1,22 @@
 # OrleansX Framework
 
-Orleans 기반의 범용 분산 상태 관리 프레임워크입니다. 게임, 실시간 애플리케이션, IoT 등 다양한 도메인에서 재사용 가능하도록 설계되었습니다.
+Orleans 기반의 엔터프라이즈급 분산 상태 관리 프레임워크입니다. 게임, 실시간 애플리케이션, IoT 등 다양한 도메인에서 재사용 가능하도록 설계되었으며, **분산 트랜잭션(Distributed Transactions)**을 지원합니다.
 
 ## 📋 목차
 
-- [소개](#소개)
-- [주요 기능](#주요-기능)
-- [아키텍처](#아키텍처)
-- [프로젝트 구조](#프로젝트-구조)
-- [시작하기](#시작하기)
-- [예제: 게임 파티 & 매칭 시스템](#예제-게임-파티--매칭-시스템)
-- [라이브러리 사용법](#라이브러리-사용법)
-- [기술 스택](#기술-스택)
+- [소개](#-소개)
+- [주요 기능](#-주요-기능)
+- [프로젝트 구조](#-프로젝트-구조)
+- [시작하기](#-시작하기)
+- [라이브러리 사용법](#-라이브러리-사용법)
+- [예제 프로젝트](#-예제-프로젝트)
+- [기술 스택](#-기술-스택)
 
 ---
 
 ## 🎯 소개
 
-**OrleansX**는 Microsoft Orleans를 기반으로 한 범용 분산 상태 관리 프레임워크입니다. 
+**OrleansX**는 Microsoft Orleans를 기반으로 한 프로덕션 레디 분산 상태 관리 프레임워크입니다.
 
 ### Orleans란?
 
@@ -43,93 +42,168 @@ Orleans는 Microsoft에서 개발한 **Virtual Actor Model** 기반의 분산 �
    - Grain 상태를 영구 저장소에 저장 가능
    - 서버 장애 시 다른 서버에서 자동 복구
 
-### Orleans의 주요 이점
+### OrleansX의 차별점
 
-- **간단한 프로그래밍 모델**: 일반 C# 객체처럼 작성
-- **자동 동시성 제어**: Lock이나 Transaction 불필요
-- **자동 확장**: 부하에 따라 자동으로 Grain 분산
-- **상태 관리**: 메모리와 영구 저장소 통합
+- ✅ **즉시 사용 가능한 베이스 클래스**
+- ✅ **분산 트랜잭션(ACID) 지원**
+- ✅ **재시도 및 멱등성 내장**
+- ✅ **표준화된 설정 패턴**
+- ✅ **통합 테스트 키트**
 
 ---
 
 ## ✨ 주요 기능
 
-### 1. Client 라이브러리 (OrleansX.Client)
-- Orleans 클러스터 연결 관리
-- 지수 백오프 재시도 정책
-- Idempotency Key 지원
-- Circuit Breaker 패턴
-- 간편한 DI 통합
+### 1. OrleansX.Abstractions
+> 인터페이스, 옵션, 이벤트 계약
 
-### 2. Silo 호스팅 (OrleansX.Silo.Hosting)
-- 표준화된 Silo 설정
-- 다양한 스토리지 Provider 지원 (Memory, ADO.NET, Redis)
-- 스트림 Provider 지원 (Memory, Kafka, EventHubs)
-- 클러스터링 옵션 (Localhost, ADO.NET)
+| 기능 | 설명 |
+|------|------|
+| **IGrainInvoker** | Grain 호출 추상화 인터페이스 |
+| **IRetryPolicy** | 재시도 정책 인터페이스 |
+| **IIdempotencyKeyProvider** | 멱등성 키 관리 인터페이스 |
+| **OrleansClientOptions** | Client 설정 옵션 (클러스터, 재시도, DB) |
+| **OrleansXSiloOptions** | Silo 설정 옵션 (클러스터링, 영속성, 스트림, 트랜잭션) |
+| **GrainEvent<T>** | Grain 이벤트 베이스 클래스 |
+| **OrleansXException** | OrleansX 전용 예외 |
 
-### 3. Grain 베이스 클래스 (OrleansX.Grains)
-- `StatefulGrainBase<TState>`: 상태를 가진 Grain의 베이스 클래스
-- `StatelessGrainBase`: 상태가 없는 Grain의 베이스 클래스
-- 스트림 헬퍼 유틸리티
+#### 주요 옵션 클래스
 
-### 4. 테스트 키트 (OrleansX.TestKit)
-- In-Memory 테스트 클러스터
-- xUnit 통합
-- 빠른 단위/통합 테스트
+```csharp
+// Clustering 옵션
+ClusteringOptions.Localhost()
+ClusteringOptions.AdoNet(dbInvariant, connectionString)
+ClusteringOptions.Redis(connectionString)
 
----
+// Persistence 옵션
+PersistenceOptions.Memory()
+PersistenceOptions.AdoNet(dbInvariant, connectionString)
+PersistenceOptions.Redis(connectionString)
 
-## 🏗️ 아키텍처
+// Streams 옵션
+StreamsOptions.Memory(streamProvider)
+StreamsOptions.Kafka(bootstrapServers, streamProvider)
+StreamsOptions.EventHubs(connectionString, streamProvider)
 
+// 🆕 Transaction 옵션
+TransactionOptions.Memory()
+TransactionOptions.AzureStorage(connectionString)
+TransactionOptions.AdoNet(dbInvariant, connectionString)
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                         │
-│  ┌──────────────┐              ┌──────────────┐             │
-│  │  API Server  │              │ Worker/Batch │             │
-│  │  (ASP.NET)   │              │   Service    │             │
-│  └──────┬───────┘              └──────┬───────┘             │
-│         │                              │                     │
-└─────────┼──────────────────────────────┼─────────────────────┘
-          │                              │
-          └──────────┬───────────────────┘
-                     │
-          ┌──────────▼──────────┐
-          │  OrleansX.Client    │
-          │  - GrainInvoker     │
-          │  - RetryPolicy      │
-          │  - Idempotency      │
-          └──────────┬──────────┘
-                     │
-                     │ TCP
-                     │
-┌────────────────────▼────────────────────────────────────────┐
-│                   Orleans Cluster                            │
-│  ┌────────────────────────────────────────────────────┐     │
-│  │              Silo 1              Silo 2            │     │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐        │     │
-│  │  │ Grain A  │  │ Grain B  │  │ Grain C  │        │     │
-│  │  │ (Memory) │  │ (Memory) │  │ (Memory) │        │     │
-│  │  └─────┬────┘  └─────┬────┘  └─────┬────┘        │     │
-│  │        │             │             │              │     │
-│  │        └─────────────┴─────────────┘              │     │
-│  │                      │                            │     │
-│  └──────────────────────┼────────────────────────────┘     │
-│                         │                                   │
-│         ┌───────────────▼───────────────┐                  │
-│         │  OrleansX.Silo.Hosting        │                  │
-│         │  - Storage Providers          │                  │
-│         │  - Stream Providers           │                  │
-│         │  - Clustering                 │                  │
-│         └───────────────┬───────────────┘                  │
-└─────────────────────────┼──────────────────────────────────┘
-                          │
-          ┌───────────────┴───────────────┐
-          │                               │
-  ┌───────▼────────┐            ┌─────────▼──────┐
-  │   PostgreSQL   │            │   Redis/Kafka  │
-  │  (Clustering,  │            │   (Streams)    │
-  │   Persistence) │            │                │
-  └────────────────┘            └────────────────┘
+
+### 2. OrleansX.Grains
+> 재사용 가능한 Grain 베이스 클래스
+
+| 클래스 | 설명 | 사용 시기 |
+|--------|------|-----------|
+| **StatefulGrainBase<TState>** | 영속 상태를 가진 Grain | 일반적인 상태 관리 |
+| **StatelessGrainBase** | 상태가 없는 Grain | 유틸리티, 계산 로직 |
+| **🆕 TransactionalGrainBase<TState>** | 트랜잭션 상태를 가진 Grain | ACID가 필요한 경우 (금융, 재고 등) |
+| **StreamHelper** | 스트림 작업 헬퍼 유틸리티 | 이벤트 발행/구독 |
+
+#### StatefulGrainBase 기능
+
+```csharp
+// 상태 관리
+protected TState State { get; }
+protected bool IsStateRecorded { get; }
+protected string? StateEtag { get; }
+
+// 메서드
+protected Task SaveStateAsync()
+protected Task ReadStateAsync()
+protected Task ClearStateAsync()
+protected Task UpdateStateAsync(Action<TState> updateAction)
+```
+
+#### 🆕 TransactionalGrainBase 기능
+
+```csharp
+// 트랜잭션 상태 관리 (ACID 보장)
+protected Task<TState> GetStateAsync()
+protected Task UpdateStateAsync(Action<TState> updateAction)
+protected Task<TResult> UpdateStateAsync<TResult>(Func<TState, TResult> updateFunc)
+protected Task<TResult> ReadStateAsync<TResult>(Func<TState, TResult> readFunc)
+```
+
+**트랜잭션 특징:**
+- ✅ **원자성(Atomicity)**: All-or-Nothing 보장
+- ✅ **일관성(Consistency)**: 여러 Grain 간 일관된 상태
+- ✅ **격리성(Isolation)**: 트랜잭션 간 격리
+- ✅ **자동 롤백**: 예외 발생 시 자동 롤백
+
+### 3. OrleansX.Client
+> Orleans Client 래퍼 및 고급 기능
+
+| 기능 | 설명 |
+|------|------|
+| **GrainInvoker** | Grain 호출 래퍼 (재시도, 멱등성 포함) |
+| **ExponentialRetryPolicy** | 지수 백오프 재시도 정책 |
+| **AsyncLocalIdempotencyKeyProvider** | 비동기 컨텍스트 기반 멱등성 키 관리 |
+| **ServiceCollectionExtensions** | DI 통합 확장 메서드 |
+
+#### 특징
+
+- **자동 재시도**: 일시적 오류 자동 복구
+- **Circuit Breaker**: 연속 실패 시 차단
+- **Idempotency**: 중복 요청 방지
+- **연결 관리**: 자동 재연결
+
+### 4. OrleansX.Silo.Hosting
+> Silo 호스팅 확장 및 표준화된 설정
+
+| 기능 | 설명 |
+|------|------|
+| **SiloBuilderExtensions** | Fluent API 기반 Silo 설정 |
+| **클러스터링 지원** | Localhost, ADO.NET, Redis |
+| **영속성 지원** | Memory, ADO.NET, Redis |
+| **스트림 지원** | Memory, Kafka, Azure Event Hubs |
+| **🆕 트랜잭션 지원** | Memory, Azure Storage, ADO.NET |
+
+#### Fluent API 예제
+
+```csharp
+siloBuilder.UseOrleansXDefaults(opts =>
+{
+    opts.WithCluster("game-cluster", "game-service")
+        .WithPorts(siloPort: 11111, gatewayPort: 30000)
+        .WithClustering(new ClusteringOptions.Localhost())
+        .WithPersistence(new PersistenceOptions.Memory())
+        .WithStreams(new StreamsOptions.Memory("Default"))
+        .WithTransactions(new TransactionOptions.Memory()); // 🆕 트랜잭션
+});
+```
+
+### 5. OrleansX.TestKit
+> 통합 테스트 유틸리티
+
+| 기능 | 설명 |
+|------|------|
+| **OrleansXTestClusterFixture** | xUnit 테스트 클러스터 Fixture |
+| **In-Memory 클러스터** | 빠른 테스트 실행 |
+| **자동 초기화/정리** | 테스트 격리 보장 |
+
+#### 사용 예제
+
+```csharp
+[Collection("OrleansXCluster")]
+public class MyGrainTests
+{
+    private readonly OrleansXTestClusterFixture _fixture;
+
+    public MyGrainTests(OrleansXTestClusterFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task TestGrain()
+    {
+        var grain = _fixture.Cluster.GrainFactory.GetGrain<IMyGrain>("key");
+        var result = await grain.DoSomethingAsync();
+        Assert.NotNull(result);
+    }
+}
 ```
 
 ---
@@ -139,19 +213,22 @@ Orleans는 Microsoft에서 개발한 **Virtual Actor Model** 기반의 분산 �
 ```
 OrleansX/
 ├── src/                                    # 라이브러리 프로젝트
-│   ├── OrleansX.Abstractions/             # 인터페이스, DTO, 이벤트 계약
-│   │   ├── IGrainInvoker.cs
-│   │   ├── IRetryPolicy.cs
-│   │   ├── IIdempotencyKeyProvider.cs
+│   ├── OrleansX.Abstractions/             # 인터페이스, DTO, 옵션
+│   │   ├── Events/
+│   │   │   └── GrainEvent.cs
+│   │   ├── Exceptions/
+│   │   │   └── OrleansXException.cs
 │   │   ├── Options/
 │   │   │   ├── OrleansClientOptions.cs
 │   │   │   └── OrleansXSiloOptions.cs
-│   │   └── Events/
-│   │       └── GrainEvent.cs
+│   │   ├── IGrainInvoker.cs
+│   │   ├── IRetryPolicy.cs
+│   │   └── IIdempotencyKeyProvider.cs
 │   │
-│   ├── OrleansX.Grains/                   # 베이스 Grain 클래스
-│   │   ├── StatefulGrainBase.cs
-│   │   ├── StatelessGrainBase.cs
+│   ├── OrleansX.Grains/                   # Grain 베이스 클래스
+│   │   ├── StatefulGrainBase.cs           # 영속 상태 Grain
+│   │   ├── StatelessGrainBase.cs          # 상태 없는 Grain
+│   │   ├── TransactionalGrainBase.cs      # 🆕 트랜잭션 Grain
 │   │   └── Utilities/
 │   │       └── StreamHelper.cs
 │   │
@@ -166,32 +243,18 @@ OrleansX/
 │   │
 │   ├── OrleansX.Silo.Hosting/             # Silo 호스팅 확장
 │   │   └── Extensions/
-│   │       ├── SiloBuilderExtensions.cs
-│   │       └── SiloBuilderExtensionsWithAction.cs
+│   │       └── SiloBuilderExtensions.cs
 │   │
 │   └── OrleansX.TestKit/                  # 테스트 유틸리티
 │       └── OrleansXTestClusterFixture.cs
 │
 ├── examples/                               # 예제 프로젝트
-│   ├── Example.Grains/                    # 게임 Grain 구현
-│   │   ├── Models/
-│   │   │   ├── PartyState.cs
-│   │   │   └── MatchmakingState.cs
-│   │   ├── Interfaces/
-│   │   │   ├── IPartyGrain.cs
-│   │   │   └── IMatchmakingGrain.cs
-│   │   ├── PartyGrain.cs
-│   │   └── MatchmakingGrain.cs
-│   │
-│   ├── Example.Api/                       # API 서버
-│   │   └── Program.cs
-│   │
-│   └── Example.SiloHost/                  # Silo 호스트
-│       └── Program.cs
+│   ├── 1-Tutorial/                        # 기본 사용법 튜토리얼
+│   ├── 2-GameMatchmaking/                 # 게임 매칭 시스템
+│   └── README.md                          # 예제 설명서
 │
-├── OrleansX.sln                           # 솔루션 파일
-├── OrleansX_PRD.md                        # 제품 요구사항 문서
-└── README.md                              # 이 문서
+├── OrleansX.sln
+└── README.md
 ```
 
 ---
@@ -201,10 +264,11 @@ OrleansX/
 ### 사전 요구사항
 
 - .NET 9.0 SDK 이상
-- (옵션) PostgreSQL - 프로덕션 환경에서 클러스터링/영속성
-- (옵션) Redis/Kafka - 스트림 처리
+- (옵션) PostgreSQL - 프로덕션 환경
+- (옵션) Redis - 캐싱/스트림
+- (옵션) Kafka - 이벤트 스트리밍
 
-### 1. 프로젝트 복제 및 빌드
+### 빌드 및 실행
 
 ```bash
 # 저장소 복제
@@ -212,234 +276,18 @@ git clone <repository-url>
 cd OrleansX
 
 # 전체 빌드
-dotnet build OrleansX.sln
-```
+dotnet build
 
-### 2. 예제 실행
-
-#### Silo 실행
-
-터미널 1에서:
-```bash
-cd examples/Example.SiloHost
+# 예제 실행 (자세한 내용은 examples/README.md 참조)
+cd examples/2-GameMatchmaking/GameMatchmaking.SiloHost
 dotnet run
 ```
-
-출력:
-```
-================================================================================
-OrleansX Example - Silo Host
-Game Party & Matchmaking System
-================================================================================
-
-Starting Orleans Silo...
-
-info: Orleans.Hosting.SiloHostedService[0]
-      Starting Orleans Silo
-...
-```
-
-#### API 서버 실행
-
-터미널 2에서:
-```bash
-cd examples/Example.Api
-dotnet run
-```
-
-출력:
-```
-info: Microsoft.Hosting.Lifetime[14]
-      Now listening on: http://localhost:5000
-```
-
----
-
-## 🎮 예제: 게임 파티 & 매칭 시스템
-
-이 예제는 실제 Live 게임에서 사용할 수 있는 파티 및 매칭 시스템을 구현합니다.
-
-### 주요 기능
-
-1. **파티 관리**
-   - 파티 생성/해산
-   - 멤버 참가/탈퇴
-   - 리더 자동 위임
-
-2. **매칭 시스템**
-   - 레이팅 기반 매칭
-   - 대기 시간에 따른 범위 확대
-   - 자동 매치 생성
-
-### API 사용 예제
-
-#### 1. 파티 생성
-
-```bash
-curl -X POST http://localhost:5000/api/parties \
-  -H "Content-Type: application/json" \
-  -d '{
-    "leaderId": "player-001",
-    "leaderName": "Alice",
-    "maxMembers": 4
-  }'
-```
-
-응답:
-```json
-{
-  "partyId": "d4f9a8b2-..."
-}
-```
-
-#### 2. 파티 참가
-
-```bash
-curl -X POST http://localhost:5000/api/parties/d4f9a8b2-.../join \
-  -H "Content-Type: application/json" \
-  -d '{
-    "playerId": "player-002",
-    "playerName": "Bob",
-    "level": 10
-  }'
-```
-
-#### 3. 파티 정보 조회
-
-```bash
-curl http://localhost:5000/api/parties/d4f9a8b2-...
-```
-
-응답:
-```json
-{
-  "partyId": "d4f9a8b2-...",
-  "leaderId": "player-001",
-  "members": [
-    {
-      "playerId": "player-001",
-      "playerName": "Alice",
-      "level": 5,
-      "joinedAt": "2025-10-17T08:00:00Z"
-    },
-    {
-      "playerId": "player-002",
-      "playerName": "Bob",
-      "level": 10,
-      "joinedAt": "2025-10-17T08:01:00Z"
-    }
-  ],
-  "maxMembers": 4,
-  "status": "Waiting",
-  "isMatchmaking": false
-}
-```
-
-#### 4. 매칭 시작
-
-```bash
-curl -X POST http://localhost:5000/api/parties/d4f9a8b2-.../matchmaking/start
-```
-
-#### 5. 매칭 큐 상태 확인
-
-```bash
-curl http://localhost:5000/api/matchmaking/queue
-```
-
-응답:
-```json
-{
-  "queueSize": 3
-}
-```
-
-### 아키텍처 흐름
-
-```
-┌──────────┐      ┌──────────────┐      ┌────────────┐
-│  Client  │─────▶│  Example.Api │─────▶│ PartyGrain │
-└──────────┘      └──────────────┘      └─────┬──────┘
-                                              │
-                                              │ StartMatchmaking
-                                              │
-                                              ▼
-                                    ┌──────────────────────┐
-                                    │ MatchmakingGrain     │
-                                    │ - Enqueue Party      │
-                                    │ - TryMatch           │
-                                    │ - Create Match       │
-                                    └──────────┬───────────┘
-                                              │
-                                              │ OnMatchFound
-                                              │
-                     ┌────────────────────────┴────────────┐
-                     ▼                                     ▼
-              ┌────────────┐                      ┌────────────┐
-              │ PartyGrain │                      │ PartyGrain │
-              │   (Team A) │                      │   (Team B) │
-              └────────────┘                      └────────────┘
-```
-
-### Grain 설계
-
-#### PartyGrain
-- **책임**: 파티 상태 관리, 멤버 관리
-- **상태**: 파티 ID, 리더, 멤버 목록, 상태
-- **주요 메서드**:
-  - `CreateAsync()`: 파티 생성
-  - `JoinAsync()`: 멤버 참가
-  - `LeaveAsync()`: 멤버 탈퇴
-  - `StartMatchmakingAsync()`: 매칭 시작
-
-#### MatchmakingGrain
-- **책임**: 매칭 큐 관리, 매치 생성
-- **상태**: 대기 중인 파티 목록, 활성 매치
-- **주요 메서드**:
-  - `EnqueuePartyAsync()`: 파티를 큐에 추가
-  - `TryMatchAsync()`: 매칭 시도 (레이팅 기반)
 
 ---
 
 ## 📚 라이브러리 사용법
 
-### 1. Client 사용법
-
-```csharp
-using OrleansX.Client.Extensions;
-using OrleansX.Abstractions;
-using OrleansX.Abstractions.Options;
-
-var builder = WebApplication.CreateBuilder(args);
-
-// OrleansX Client 등록
-builder.Services.AddOrleansXClient(new OrleansClientOptions
-{
-    ClusterId = "my-cluster",
-    ServiceId = "my-service",
-    Db = new DatabaseOptions("Npgsql", "Host=localhost;Database=orleans;"),
-    Retry = new RetryOptions
-    {
-        MaxAttempts = 3,
-        BaseDelayMs = 200,
-        MaxDelayMs = 10000
-    }
-});
-
-var app = builder.Build();
-
-// Grain 호출
-app.MapGet("/greet/{name}", async (string name, IGrainInvoker invoker) =>
-{
-    var grain = invoker.GetGrain<IMyGrain>(name);
-    var result = await grain.SayHelloAsync();
-    return Results.Ok(new { message = result });
-});
-
-app.Run();
-```
-
-### 2. Silo 사용법
+### 1. Silo 설정
 
 ```csharp
 using Microsoft.Extensions.Hosting;
@@ -457,7 +305,8 @@ builder.UseOrleans((context, siloBuilder) =>
             .WithPorts(siloPort: 11111, gatewayPort: 30000)
             .WithClustering(new ClusteringOptions.Localhost())
             .WithPersistence(new PersistenceOptions.Memory())
-            .WithStreams(new StreamsOptions.Memory("Default"));
+            .WithStreams(new StreamsOptions.Memory("Default"))
+            .WithTransactions(new TransactionOptions.Memory()); // 🆕 트랜잭션
     });
 });
 
@@ -465,90 +314,174 @@ var host = builder.Build();
 await host.RunAsync();
 ```
 
-### 3. Grain 작성
+### 2. Client 설정
+
+```csharp
+using OrleansX.Client.Extensions;
+using OrleansX.Abstractions.Options;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddOrleansXClient(new OrleansClientOptions
+{
+    ClusterId = "my-cluster",
+    ServiceId = "my-service",
+    Retry = new RetryOptions
+    {
+        MaxAttempts = 3,
+        BaseDelayMs = 200,
+        MaxDelayMs = 10000
+    }
+});
+
+var app = builder.Build();
+
+app.MapGet("/hello/{name}", async (string name, IGrainInvoker invoker) =>
+{
+    var grain = invoker.GetGrain<IHelloGrain>(name);
+    return await grain.SayHelloAsync();
+});
+
+app.Run();
+```
+
+### 3. 일반 Grain 작성
 
 ```csharp
 using OrleansX.Grains;
-using Microsoft.Extensions.Logging;
 using Orleans.Runtime;
-
-// 인터페이스 정의
-public interface IMyGrain : IGrainWithStringKey
-{
-    Task<string> SayHelloAsync();
-    Task SetNameAsync(string name);
-}
 
 // 상태 정의
 [GenerateSerializer]
-public class MyGrainState
+public class PlayerState
 {
-    [Id(0)]
-    public string Name { get; set; } = string.Empty;
-    
-    [Id(1)]
-    public int VisitCount { get; set; }
+    [Id(0)] public string Name { get; set; } = string.Empty;
+    [Id(1)] public int Level { get; set; }
+    [Id(2)] public int Experience { get; set; }
 }
 
 // Grain 구현
-public class MyGrain : StatefulGrainBase<MyGrainState>, IMyGrain
+public class PlayerGrain : StatefulGrainBase<PlayerState>, IPlayerGrain
 {
-    public MyGrain(
-        [PersistentState("mystate")] IPersistentState<MyGrainState> state,
-        ILogger<MyGrain> logger) : base(state, logger)
+    public PlayerGrain(
+        [PersistentState("player")] IPersistentState<PlayerState> state,
+        ILogger<PlayerGrain> logger)
+        : base(state, logger)
     {
     }
 
-    public Task<string> SayHelloAsync()
+    public async Task GainExperienceAsync(int exp)
     {
-        State.VisitCount++;
-        await SaveStateAsync();
-        
-        return Task.FromResult(
-            $"Hello, {State.Name}! Visit count: {State.VisitCount}");
-    }
-
-    public async Task SetNameAsync(string name)
-    {
-        State.Name = name;
-        await SaveStateAsync();
+        await UpdateStateAsync(state =>
+        {
+            state.Experience += exp;
+            if (state.Experience >= 100)
+            {
+                state.Level++;
+                state.Experience = 0;
+            }
+        });
     }
 }
 ```
 
-### 4. 테스트 작성
+### 4. 🆕 트랜잭션 Grain 작성
 
 ```csharp
-using OrleansX.TestKit;
-using Xunit;
+using OrleansX.Grains;
+using Orleans.Transactions.Abstractions;
 
-[Collection("OrleansXCluster")]
-public class MyGrainTests
+// 계좌 상태 (트랜잭션)
+[GenerateSerializer]
+public class AccountState
 {
-    private readonly OrleansXTestClusterFixture _fixture;
+    [Id(0)] public string AccountNumber { get; set; } = string.Empty;
+    [Id(1)] public decimal Balance { get; set; }
+}
 
-    public MyGrainTests(OrleansXTestClusterFixture fixture)
+// 트랜잭션 Grain (ACID 보장)
+public class AccountGrain : TransactionalGrainBase<AccountState>, IAccountGrain
+{
+    public AccountGrain(
+        [TransactionalState("account")] ITransactionalState<AccountState> state,
+        ILogger<AccountGrain> logger)
+        : base(state, logger)
     {
-        _fixture = fixture;
     }
 
-    [Fact]
-    public async Task SayHello_ReturnsGreeting()
+    // 🔷 트랜잭션 메서드 - 입금
+    [Transaction(TransactionOption.Join)]
+    public async Task DepositAsync(decimal amount)
     {
-        // Arrange
-        var grain = _fixture.Cluster.GrainFactory
-            .GetGrain<IMyGrain>("test-user");
-        await grain.SetNameAsync("Alice");
+        await UpdateStateAsync(state =>
+        {
+            state.Balance += amount;
+        });
+    }
 
-        // Act
-        var result = await grain.SayHelloAsync();
+    // 🔷 트랜잭션 메서드 - 출금
+    [Transaction(TransactionOption.Join)]
+    public async Task WithdrawAsync(decimal amount)
+    {
+        await UpdateStateAsync(state =>
+        {
+            if (state.Balance < amount)
+                throw new InvalidOperationException("Insufficient balance");
+            state.Balance -= amount;
+        });
+    }
 
-        // Assert
-        Assert.Contains("Hello, Alice", result);
-        Assert.Contains("Visit count: 1", result);
+    // ⚪ 일반 메서드 - 조회 (트랜잭션 불필요)
+    public async Task<decimal> GetBalanceAsync()
+    {
+        return await ReadStateAsync(state => state.Balance);
+    }
+}
+
+// 계좌 이체 Grain (여러 Grain 간 트랜잭션)
+public class TransferGrain : Grain, ITransferGrain
+{
+    [Transaction(TransactionOption.Create)] // 🆕 트랜잭션 생성
+    public async Task<bool> TransferAsync(string fromAccount, string toAccount, decimal amount)
+    {
+        var fromGrain = GrainFactory.GetGrain<IAccountGrain>(fromAccount);
+        var toGrain = GrainFactory.GetGrain<IAccountGrain>(toAccount);
+
+        // 출금과 입금이 원자적으로 처리 (All-or-Nothing)
+        await fromGrain.WithdrawAsync(amount);
+        await toGrain.DepositAsync(amount);
+
+        return true;
     }
 }
 ```
+
+**트랜잭션 속성:**
+- `TransactionOption.Create`: 새 트랜잭션 생성
+- `TransactionOption.Join`: 기존 트랜잭션 참여
+- `TransactionOption.CreateOrJoin`: 있으면 참여, 없으면 생성
+- `TransactionOption.Suppress`: 트랜잭션 없이 실행
+- `TransactionOption.NotAllowed`: 트랜잭션 컨텍스트에서 호출 시 예외
+
+---
+
+## 🎮 예제 프로젝트
+
+자세한 내용은 [examples/README.md](examples/README.md)를 참조하세요.
+
+### 1. Tutorial - 기본 사용법
+- StatefulGrain 사용
+- StatelessGrain 사용
+- TransactionalGrain 사용 (🆕)
+- Stream 사용
+- 테스트 작성
+
+### 2. Game Matchmaking - 실전 예제
+- 플레이어 관리
+- 파티 시스템
+- MMR 기반 매칭 (개인/파티)
+- 룸 및 캐릭터 선택
+- 트랜잭션 활용 (파티 생성, 매칭 완료)
 
 ---
 
@@ -558,6 +491,7 @@ public class MyGrainTests
 |------|------|
 | **프레임워크** | .NET 9.0 |
 | **Orleans** | Microsoft Orleans 9.2.1 |
+| **트랜잭션** | Microsoft.Orleans.Transactions 9.2.1 🆕 |
 | **스토리지** | ADO.NET (PostgreSQL), Redis, Memory |
 | **스트림** | Memory, Kafka, Azure Event Hubs |
 | **테스트** | xUnit, Orleans.TestingHost |
@@ -565,88 +499,26 @@ public class MyGrainTests
 
 ---
 
-## 📖 Orleans 주요 개념
-
-### Grain Lifecycle
-
-```
-┌─────────────┐
-│  Inactive   │
-└──────┬──────┘
-       │ 첫 번째 호출
-       ▼
-┌─────────────┐
-│ Activating  │ ◄─── OnActivateAsync() 호출
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│   Active    │ ◄─── 메서드 호출 처리
-└──────┬──────┘
-       │ Idle timeout 또는 DeactivateOnIdle()
-       ▼
-┌─────────────┐
-│ Deactivating│ ◄─── OnDeactivateAsync() 호출
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  Inactive   │
-└─────────────┘
-```
-
-### 상태 영속성
-
-```csharp
-// 상태 읽기
-await State.ReadStateAsync();
-
-// 상태 수정 및 저장
-State.MyProperty = newValue;
-await State.WriteStateAsync();
-
-// 상태 삭제
-await State.ClearStateAsync();
-```
-
-### 스트림 사용
-
-```csharp
-// Producer
-var stream = this.GetStreamProvider("Default")
-    .GetStream<MyEvent>(streamId);
-await stream.OnNextAsync(new MyEvent { ... });
-
-// Consumer
-var subscription = await stream.SubscribeAsync(
-    async (data, token) => {
-        // 이벤트 처리
-    });
-```
-
----
-
 ## 🎓 Best Practices
 
-### 1. Grain 설계
-- **단일 책임**: 각 Grain은 하나의 엔티티만 관리
-- **불변 메시지**: DTO는 불변 객체로 설계
-- **비동기 우선**: 모든 메서드는 Task 반환
+### Grain 설계
+- ✅ 단일 책임 원칙
+- ✅ 불변 메시지 사용
+- ✅ 모든 메서드는 async
+- ✅ ACID가 필요한 경우 트랜잭션 사용 🆕
 
-### 2. 상태 관리
-- **적절한 저장 시점**: 비즈니스 로직 완료 후 저장
-- **낙관적 동시성**: ETag를 활용한 충돌 감지
-- **스냅샷**: 큰 상태는 주기적으로 스냅샷
+### 트랜잭션 사용 시 주의사항 🆕
+- ✅ 금융, 재고 등 중요한 데이터에 사용
+- ✅ 트랜잭션 범위를 최소화
+- ✅ 읽기 전용은 일반 메서드 사용
+- ⚠️ 트랜잭션 내에서 외부 API 호출 지양
+- ⚠️ 긴 작업은 트랜잭션 분리
 
-### 3. 성능 최적화
-- **Grain 호출 최소화**: 여러 정보를 한 번에 조회
-- **Stateless Worker**: 무상태 작업은 StatelessWorker 사용
-- **캐싱**: 자주 읽는 데이터는 메모리에 캐시
-
-### 4. 에러 처리
-- **재시도 정책**: 일시적 오류는 자동 재시도
-- **Circuit Breaker**: 연속된 실패 시 차단
-- **로깅**: 모든 중요 이벤트 로깅
+### 성능 최적화
+- ✅ Grain 호출 최소화
+- ✅ Stateless Worker 활용
+- ✅ 적절한 캐싱
+- ✅ 불필요한 트랜잭션 지양
 
 ---
 

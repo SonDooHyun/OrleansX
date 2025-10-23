@@ -44,6 +44,11 @@ public class OrleansXSiloOptions
     /// 대시보드 포트
     /// </summary>
     public int? DashboardPort { get; init; }
+
+    /// <summary>
+    /// 트랜잭션 설정
+    /// </summary>
+    public TransactionOptions? Transactions { get; init; }
 }
 
 /// <summary>
@@ -87,4 +92,28 @@ public abstract record StreamsOptions
 
     public record EventHubs(string ConnectionString, string StreamProvider = "EventHubs") : StreamsOptions;
 }
+
+/// <summary>
+/// 트랜잭션 설정
+/// </summary>
+public abstract record TransactionOptions
+{
+    private TransactionOptions() { }
+
+    /// <summary>
+    /// 메모리 기반 트랜잭션 로그
+    /// </summary>
+    public record Memory : TransactionOptions;
+
+    /// <summary>
+    /// Azure Storage 기반 트랜잭션 로그
+    /// </summary>
+    public record AzureStorage(string ConnectionString) : TransactionOptions;
+
+    /// <summary>
+    /// AdoNet 기반 트랜잭션 로그
+    /// </summary>
+    public record AdoNet(string DbInvariant, string ConnectionString) : TransactionOptions;
+}
+
 

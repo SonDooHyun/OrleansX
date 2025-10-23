@@ -9,43 +9,43 @@ namespace Example.Grains.Interfaces;
 public interface IPartyGrain : IGrainWithStringKey
 {
     /// <summary>
-    /// 파티를 생성합니다.
+    /// 파티 생성
     /// </summary>
-    Task<bool> CreateAsync(string leaderId, string leaderName, int maxMembers = 4);
+    Task CreateAsync(string leaderId, string leaderName, int leaderLevel, int leaderMmr, int maxMembers = 5);
 
     /// <summary>
-    /// 파티에 참가합니다.
+    /// 파티 정보 조회
     /// </summary>
-    Task<bool> JoinAsync(string playerId, string playerName, int level);
+    Task<PartyState?> GetInfoAsync();
 
     /// <summary>
-    /// 파티에서 탈퇴합니다.
+    /// 멤버 참가
+    /// </summary>
+    Task<bool> JoinAsync(string playerId, string playerName, int level, int mmr);
+
+    /// <summary>
+    /// 멤버 탈퇴
     /// </summary>
     Task<bool> LeaveAsync(string playerId);
 
     /// <summary>
-    /// 파티를 해산합니다.
-    /// </summary>
-    Task<bool> DisbandAsync(string requesterId);
-
-    /// <summary>
-    /// 파티 정보를 가져옵니다.
-    /// </summary>
-    Task<PartyState?> GetStateAsync();
-
-    /// <summary>
-    /// 매칭 큐에 등록합니다.
+    /// 매칭 시작
     /// </summary>
     Task<bool> StartMatchmakingAsync();
 
     /// <summary>
-    /// 매칭을 취소합니다.
+    /// 매칭 취소
     /// </summary>
-    Task<bool> CancelMatchmakingAsync();
+    Task CancelMatchmakingAsync();
 
     /// <summary>
-    /// 매치가 발견되었음을 알립니다.
+    /// 매치 찾음 (매칭 시스템에서 호출)
     /// </summary>
-    Task OnMatchFoundAsync(string matchId);
+    Task OnMatchFoundAsync(string roomId, string matchId);
+
+    /// <summary>
+    /// 파티 해산
+    /// </summary>
+    Task DisbandAsync();
 }
 
