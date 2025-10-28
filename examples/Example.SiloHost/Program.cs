@@ -15,6 +15,7 @@ builder.UseOrleans((context, siloBuilder) =>
             .WithClustering(new ClusteringOptions.Localhost())
             .WithPersistence(new PersistenceOptions.Memory())
             .WithStreams(new StreamsOptions.Memory("Default"))
+            .WithDashboard(port: 23000)
             .WithTransactions(new TransactionOptions.Memory()); // 트랜잭션 지원
     });
 

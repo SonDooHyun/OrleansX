@@ -46,6 +46,7 @@ Orleans는 Microsoft에서 개발한 **Virtual Actor Model** 기반의 분산 �
 
 - ✅ **즉시 사용 가능한 베이스 클래스**
 - ✅ **분산 트랜잭션(ACID) 지원**
+- ✅ **워커 Grain 패턴** (백그라운드 작업 자동화)
 - ✅ **재시도 및 멱등성 내장**
 - ✅ **표준화된 설정 패턴**
 - ✅ **통합 테스트 키트**
@@ -62,6 +63,7 @@ Orleans는 Microsoft에서 개발한 **Virtual Actor Model** 기반의 분산 �
 | **IGrainInvoker** | Grain 호출 추상화 인터페이스 |
 | **IRetryPolicy** | 재시도 정책 인터페이스 |
 | **IIdempotencyKeyProvider** | 멱등성 키 관리 인터페이스 |
+| **🆕 IWorkerGrain** | 워커 Grain 표준 인터페이스 |
 | **OrleansClientOptions** | Client 설정 옵션 (클러스터, 재시도, DB) |
 | **OrleansXSiloOptions** | Silo 설정 옵션 (클러스터링, 영속성, 스트림, 트랜잭션) |
 | **GrainEvent<T>** | Grain 이벤트 베이스 클래스 |
@@ -99,6 +101,8 @@ TransactionOptions.AdoNet(dbInvariant, connectionString)
 | **StatefulGrainBase<TState>** | 영속 상태를 가진 Grain | 일반적인 상태 관리 |
 | **StatelessGrainBase** | 상태가 없는 Grain | 유틸리티, 계산 로직 |
 | **🆕 TransactionalGrainBase<TState>** | 트랜잭션 상태를 가진 Grain | ACID가 필요한 경우 (금융, 재고 등) |
+| **🆕 StatefulWorkerGrainBase<TState>** | 상태를 가진 워커 Grain | 주기적인 백그라운드 작업 (상태 저장 필요) |
+| **🆕 StatelessWorkerGrainBase** | 상태가 없는 워커 Grain | 주기적인 백그라운드 작업 (경량) |
 | **StreamHelper** | 스트림 작업 헬퍼 유틸리티 | 이벤트 발행/구독 |
 
 #### StatefulGrainBase 기능
@@ -131,6 +135,37 @@ protected Task<TResult> ReadStateAsync<TResult>(Func<TState, TResult> readFunc)
 - ✅ **일관성(Consistency)**: 여러 Grain 간 일관된 상태
 - ✅ **격리성(Isolation)**: 트랜잭션 간 격리
 - ✅ **자동 롤백**: 예외 발생 시 자동 롤백
+
+#### 🆕 WorkerGrainBase 기능
+
+```csharp
+// 워커 제어
+protected Task StartTimerAsync(TimeSpan dueTime, TimeSpan period)  // Timer 기반 주기 실행
+protected Task StopAsync()
+protected abstract Task ExecuteWorkAsync()
+
+// 상태 관리 (StatefulWorkerGrainBase만)
+protected TState State { get; }
+protected Task SaveStateAsync()
+protected Task UpdateStateAsync(Action<TState> updateAction)
+
+// 훅 메서드
+protected virtual Task OnBeforeExecuteAsync()
+protected virtual Task OnAfterExecuteAsync()
+protected virtual Task OnErrorAsync(Exception exception)
+
+// 모니터링
+public Task<WorkerStatus> GetStatusAsync()
+public Task ResetStatisticsAsync()
+```
+
+**워커 특징:**
+- ✅ **Timer 지원**: 주기적 작업 실행 (Grain 활성화 중에만 동작)
+- ✅ **에러 복원력**: 작업 실패 시 자동 에러 처리
+- ✅ **생명주기 관리**: 시작/중지 제어
+- ✅ **실행 통계**: 성공/실패 횟수 추적
+- ✅ **훅 메서드**: 작업 전/후/에러 처리 커스터마이징
+- 💡 **Reminder 지원**: 필요 시 IRemindable 인터페이스를 구현하여 영속적 스케줄링 가능
 
 ### 3. OrleansX.Client
 > Orleans Client 래퍼 및 고급 기능
@@ -223,12 +258,15 @@ OrleansX/
 │   │   │   └── OrleansXSiloOptions.cs
 │   │   ├── IGrainInvoker.cs
 │   │   ├── IRetryPolicy.cs
-│   │   └── IIdempotencyKeyProvider.cs
+│   │   ├── IIdempotencyKeyProvider.cs
+│   │   └── IWorkerGrain.cs                # 🆕 워커 Grain 인터페이스
 │   │
 │   ├── OrleansX.Grains/                   # Grain 베이스 클래스
 │   │   ├── StatefulGrainBase.cs           # 영속 상태 Grain
 │   │   ├── StatelessGrainBase.cs          # 상태 없는 Grain
 │   │   ├── TransactionalGrainBase.cs      # 🆕 트랜잭션 Grain
+│   │   ├── StatefulWorkerGrainBase.cs     # 🆕 상태를 가진 워커 Grain
+│   │   ├── StatelessWorkerGrainBase.cs    # 🆕 상태 없는 워커 Grain
 │   │   └── Utilities/
 │   │       └── StreamHelper.cs
 │   │
@@ -463,6 +501,219 @@ public class TransferGrain : Grain, ITransferGrain
 - `TransactionOption.Suppress`: 트랜잭션 없이 실행
 - `TransactionOption.NotAllowed`: 트랜잭션 컨텍스트에서 호출 시 예외
 
+### 5. 🆕 워커 Grain 작성
+
+```csharp
+using OrleansX.Grains;
+using Orleans.Runtime;
+
+// 워커 상태 정의
+[GenerateSerializer]
+public class CleanupWorkerState
+{
+    [Id(0)] public DateTime LastCleanupTime { get; set; }
+    [Id(1)] public int TotalCleaned { get; set; }
+}
+
+// 상태를 가진 워커 Grain (주기적인 데이터 정리 작업)
+public class CleanupWorkerGrain : StatefulWorkerGrainBase<CleanupWorkerState>, IWorkerGrain
+{
+    public CleanupWorkerGrain(
+        [PersistentState("cleanup")] IPersistentState<CleanupWorkerState> state,
+        ILogger<CleanupWorkerGrain> logger)
+        : base(state, logger)
+    {
+    }
+
+    // 워커 시작
+    public async Task StartAsync()
+    {
+        // 5분마다 실행 (첫 실행은 10초 후)
+        await StartTimerAsync(
+            dueTime: TimeSpan.FromSeconds(10),
+            period: TimeSpan.FromMinutes(5));
+    }
+
+    // 실제 작업 구현
+    protected override async Task ExecuteWorkAsync()
+    {
+        Logger.LogInformation("Starting cleanup process...");
+
+        // 오래된 데이터 정리 로직
+        var deletedCount = await CleanupOldDataAsync();
+
+        // 상태 업데이트
+        await UpdateStateAsync(state =>
+        {
+            state.LastCleanupTime = DateTime.UtcNow;
+            state.TotalCleaned += deletedCount;
+        });
+
+        Logger.LogInformation("Cleanup completed. Deleted: {Count}, Total: {Total}", 
+            deletedCount, State.TotalCleaned);
+    }
+
+    // 에러 처리 커스터마이징
+    protected override async Task OnErrorAsync(Exception exception)
+    {
+        Logger.LogError(exception, "Cleanup failed!");
+        
+        // 에러 알림 전송 등
+        await NotifyAdminAsync(exception);
+        
+        await base.OnErrorAsync(exception);
+    }
+
+    private Task<int> CleanupOldDataAsync()
+    {
+        // 실제 정리 로직
+        return Task.FromResult(42);
+    }
+
+    private Task NotifyAdminAsync(Exception exception)
+    {
+        // 관리자 알림 로직
+        return Task.CompletedTask;
+    }
+}
+
+// 상태가 없는 경량 워커 Grain (헬스체크)
+public class HealthCheckWorkerGrain : StatelessWorkerGrainBase
+{
+    private readonly IHttpClientFactory _httpClientFactory;
+
+    public HealthCheckWorkerGrain(
+        ILogger<HealthCheckWorkerGrain> logger,
+        IHttpClientFactory httpClientFactory)
+        : base(logger)
+    {
+        _httpClientFactory = httpClientFactory;
+    }
+
+    public override async Task OnActivateAsync(CancellationToken cancellationToken)
+    {
+        await base.OnActivateAsync(cancellationToken);
+        
+        // 활성화 시 자동 시작 (30초마다 실행)
+        await StartTimerAsync(
+            dueTime: TimeSpan.Zero,
+            period: TimeSpan.FromSeconds(30));
+    }
+
+    protected override async Task ExecuteWorkAsync()
+    {
+        var httpClient = _httpClientFactory.CreateClient();
+        var response = await httpClient.GetAsync("https://api.example.com/health");
+        
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("Health check failed: {StatusCode}", response.StatusCode);
+        }
+    }
+}
+```
+
+**워커 사용 예시:**
+```csharp
+// 워커 시작
+var worker = grainFactory.GetGrain<IWorkerGrain>("cleanup-worker");
+await worker.StartAsync();
+
+// 워커 상태 확인
+var status = await worker.GetStatusAsync();
+Console.WriteLine($"실행 중: {status.IsRunning}");
+Console.WriteLine($"성공: {status.SuccessCount}, 실패: {status.FailureCount}");
+Console.WriteLine($"성공률: {status.SuccessRate:F2}%");
+
+// 워커 중지
+await worker.StopAsync();
+```
+
+**Reminder를 사용하는 영속적 워커 (Grain 비활성화 후에도 동작):**
+```csharp
+using Orleans.Runtime;
+using OrleansX.Grains;
+
+// IRemindable 인터페이스를 명시적으로 구현
+public class PersistentReportWorkerGrain : StatefulWorkerGrainBase<ReportWorkerState>, 
+    IWorkerGrain, IRemindable
+{
+    private const string ReminderName = "DailyReport";
+
+    public PersistentReportWorkerGrain(
+        [PersistentState("report")] IPersistentState<ReportWorkerState> state,
+        ILogger<PersistentReportWorkerGrain> logger)
+        : base(state, logger)
+    {
+    }
+
+    // 워커 시작 - Reminder 등록
+    public async Task StartAsync()
+    {
+        // Reminder는 Grain이 비활성화되어도 계속 동작합니다
+        await this.RegisterOrUpdateReminder(
+            ReminderName,
+            dueTime: TimeSpan.FromHours(1),    // 1시간 후 첫 실행
+            period: TimeSpan.FromHours(24));   // 매일 실행
+        
+        Logger.LogInformation("Persistent worker started with Reminder");
+    }
+
+    // Reminder 콜백 - Orleans가 자동으로 호출
+    public async Task ReceiveReminder(string reminderName, TickStatus status)
+    {
+        if (reminderName == ReminderName)
+        {
+            Logger.LogInformation("Reminder received: {Name}", reminderName);
+            await ExecuteWorkAsync();
+        }
+    }
+
+    protected override async Task ExecuteWorkAsync()
+    {
+        Logger.LogInformation("Generating daily report...");
+        
+        // 리포트 생성 로직
+        var report = await GenerateDailyReportAsync();
+        
+        await UpdateStateAsync(state =>
+        {
+            state.LastReportTime = DateTime.UtcNow;
+            state.TotalReports++;
+        });
+        
+        Logger.LogInformation("Daily report completed");
+    }
+
+    public override async Task StopAsync()
+    {
+        // Reminder 제거
+        var reminder = await this.GetReminder(ReminderName);
+        if (reminder != null)
+        {
+            await this.UnregisterReminder(reminder);
+        }
+        
+        await base.StopAsync();
+    }
+
+    private Task<string> GenerateDailyReportAsync()
+    {
+        return Task.FromResult("Daily Report Data");
+    }
+}
+```
+
+**Timer vs Reminder 비교:**
+
+| 특징 | Timer | Reminder |
+|------|-------|----------|
+| **동작 방식** | Grain 활성화 중에만 | Grain 비활성화 후에도 지속 |
+| **영속성** | 없음 (메모리만) | 있음 (저장소에 저장) |
+| **정확도** | 높음 | 비교적 낮음 (수 분 단위) |
+| **사용 사례** | 짧은 주기 작업, 실시간 모니터링 | 일일 배치, 주기적 정리 작업 |
+| **구현 복잡도** | 낮음 (기본 제공) | 높음 (IRemindable 구현 필요) |
+
 ---
 
 ## 🎮 예제 프로젝트
@@ -473,6 +724,7 @@ public class TransferGrain : Grain, ITransferGrain
 - StatefulGrain 사용
 - StatelessGrain 사용
 - TransactionalGrain 사용 (🆕)
+- WorkerGrain 사용 (🆕)
 - Stream 사용
 - 테스트 작성
 
@@ -514,11 +766,20 @@ public class TransferGrain : Grain, ITransferGrain
 - ⚠️ 트랜잭션 내에서 외부 API 호출 지양
 - ⚠️ 긴 작업은 트랜잭션 분리
 
+### 워커 Grain 사용 시 주의사항 🆕
+- ✅ **Timer 특성**: Grain이 활성화되어 있을 때만 동작 (비활성화 시 중지)
+- ✅ **작업 시간 고려**: 긴 작업은 주기보다 짧게 유지
+- ✅ **에러 처리**: OnErrorAsync로 예외 처리 로직 구현
+- ✅ **상태 저장**: 중요한 작업 이력은 상태로 저장
+- ⚠️ **동시성 주의**: 여러 워커가 같은 리소스 접근 시 동기화 필요
+- 💡 **영속적 스케줄링**: Timer는 Grain 비활성화 시 중지되므로, 영속적 스케줄링이 필요하면 IRemindable 인터페이스 구현 권장
+
 ### 성능 최적화
 - ✅ Grain 호출 최소화
 - ✅ Stateless Worker 활용
 - ✅ 적절한 캐싱
 - ✅ 불필요한 트랜잭션 지양
+- ✅ 워커는 경량 작업에 사용 (무거운 작업은 별도 서비스로)
 
 ---
 
