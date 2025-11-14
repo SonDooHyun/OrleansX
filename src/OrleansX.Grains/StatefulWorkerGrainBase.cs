@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Orleans;
 using Orleans.Runtime;
-using Orleans.Timers;
+using OrleansX.Grains.Internal;
 
 namespace OrleansX.Grains;
 
@@ -14,13 +14,7 @@ public abstract class StatefulWorkerGrainBase<TState> : Grain where TState : cla
 {
     private readonly IPersistentState<TState> _state;
     protected readonly ILogger Logger;
-    private IDisposable? _timer;
-    private bool _isRunning;
-    private DateTime? _lastExecutionTime;
-    private DateTime? _nextExecutionTime;
-    private int _successCount;
-    private int _failureCount;
-    private readonly object _statsLock = new();
+    private readonly WorkerExecutor _executor;
 
     protected StatefulWorkerGrainBase(
         [PersistentState("state")] IPersistentState<TState> state,
@@ -28,6 +22,13 @@ public abstract class StatefulWorkerGrainBase<TState> : Grain where TState : cla
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         Logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _executor = new WorkerExecutor(
+            logger,
+            ExecuteWorkAsync,
+            OnBeforeExecuteAsync,
+            OnAfterExecuteAsync,
+            OnErrorAsync,
+            () => this.GetPrimaryKeyString());
     }
 
     /// <summary>
@@ -48,63 +49,27 @@ public abstract class StatefulWorkerGrainBase<TState> : Grain where TState : cla
     /// <summary>
     /// 워커가 실행 중인지 여부
     /// </summary>
-    protected bool IsRunning => _isRunning;
+    protected bool IsRunning => _executor.IsRunning;
 
     /// <summary>
     /// 마지막 작업 실행 시간
     /// </summary>
-    protected DateTime? LastExecutionTime
-    {
-        get
-        {
-            lock (_statsLock)
-            {
-                return _lastExecutionTime;
-            }
-        }
-    }
+    protected DateTime? LastExecutionTime => _executor.LastExecutionTime;
 
     /// <summary>
     /// 다음 작업 실행 예정 시간
     /// </summary>
-    protected DateTime? NextExecutionTime
-    {
-        get
-        {
-            lock (_statsLock)
-            {
-                return _nextExecutionTime;
-            }
-        }
-    }
+    protected DateTime? NextExecutionTime => _executor.NextExecutionTime;
 
     /// <summary>
     /// 성공한 작업 실행 횟수
     /// </summary>
-    protected int SuccessCount
-    {
-        get
-        {
-            lock (_statsLock)
-            {
-                return _successCount;
-            }
-        }
-    }
+    protected int SuccessCount => _executor.SuccessCount;
 
     /// <summary>
     /// 실패한 작업 실행 횟수
     /// </summary>
-    protected int FailureCount
-    {
-        get
-        {
-            lock (_statsLock)
-            {
-                return _failureCount;
-            }
-        }
-    }
+    protected int FailureCount => _executor.FailureCount;
 
     /// <summary>
     /// 상태를 저장합니다.
@@ -175,33 +140,7 @@ public abstract class StatefulWorkerGrainBase<TState> : Grain where TState : cla
     /// <param name="dueTime">첫 실행까지의 지연 시간</param>
     /// <param name="period">실행 주기</param>
     protected virtual Task StartTimerAsync(TimeSpan dueTime, TimeSpan period)
-    {
-        if (_isRunning)
-        {
-            Logger.LogWarning("Worker grain {GrainId} is already running", this.GetPrimaryKeyString());
-            return Task.CompletedTask;
-        }
-
-        _timer = this.RegisterGrainTimer(
-            async _ => await ExecuteWorkWithErrorHandlingAsync(),
-            new GrainTimerCreationOptions
-            {
-                DueTime = dueTime,
-                Period = period,
-                Interleave = true
-            });
-
-        _isRunning = true;
-        lock (_statsLock)
-        {
-            _nextExecutionTime = DateTime.UtcNow.Add(dueTime);
-        }
-
-        Logger.LogInformation("Worker grain {GrainId} started with timer (DueTime: {DueTime}, Period: {Period})", 
-            this.GetPrimaryKeyString(), dueTime, period);
-
-        return Task.CompletedTask;
-    }
+        => _executor.StartTimerAsync(this, dueTime, period);
 
     // Reminder 기능은 사용자가 필요 시 IRemindable 인터페이스를 직접 구현하여 사용하세요.
     // Orleans 9.x에서는 Reminder를 사용하기 위해 명시적으로 IRemindable을 구현해야 합니다.
@@ -209,27 +148,7 @@ public abstract class StatefulWorkerGrainBase<TState> : Grain where TState : cla
     /// <summary>
     /// 작업을 중지합니다.
     /// </summary>
-    protected virtual async Task StopAsync()
-    {
-        if (!_isRunning)
-        {
-            Logger.LogWarning("Worker grain {GrainId} is not running", this.GetPrimaryKeyString());
-            return;
-        }
-
-        _timer?.Dispose();
-        _timer = null;
-
-        _isRunning = false;
-        lock (_statsLock)
-        {
-            _nextExecutionTime = null;
-        }
-
-        Logger.LogInformation("Worker grain {GrainId} stopped", this.GetPrimaryKeyString());
-
-        await Task.CompletedTask;
-    }
+    protected virtual Task StopAsync() => _executor.StopAsync();
 
     /// <summary>
     /// 실행할 작업을 정의합니다. (파생 클래스에서 구현 필요)
@@ -264,42 +183,6 @@ public abstract class StatefulWorkerGrainBase<TState> : Grain where TState : cla
     }
 
     /// <summary>
-    /// 에러 처리를 포함한 작업 실행 래퍼
-    /// </summary>
-    private async Task ExecuteWorkWithErrorHandlingAsync()
-    {
-        var startTime = DateTime.UtcNow;
-
-        try
-        {
-            await OnBeforeExecuteAsync();
-
-            Logger.LogDebug("Executing work for worker grain {GrainId}", this.GetPrimaryKeyString());
-            await ExecuteWorkAsync();
-
-            lock (_statsLock)
-            {
-                _successCount++;
-                _lastExecutionTime = startTime;
-            }
-
-            await OnAfterExecuteAsync();
-
-            Logger.LogDebug("Work executed successfully for worker grain {GrainId}", this.GetPrimaryKeyString());
-        }
-        catch (Exception ex)
-        {
-            lock (_statsLock)
-            {
-                _failureCount++;
-            }
-
-            await OnErrorAsync(ex);
-        }
-    }
-
-
-    /// <summary>
     /// Grain이 활성화될 때 호출됩니다.
     /// </summary>
     public override Task OnActivateAsync(CancellationToken cancellationToken)
@@ -313,11 +196,11 @@ public abstract class StatefulWorkerGrainBase<TState> : Grain where TState : cla
     /// </summary>
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
-        Logger.LogInformation("Worker grain {GrainId} deactivating. Reason: {Reason}", 
+        Logger.LogInformation("Worker grain {GrainId} deactivating. Reason: {Reason}",
             this.GetPrimaryKeyString(), reason);
 
         // Timer 정리 (Reminder는 자동으로 유지됨)
-        _timer?.Dispose();
+        _executor.Dispose();
 
         await base.OnDeactivateAsync(reason, cancellationToken);
     }
@@ -327,17 +210,7 @@ public abstract class StatefulWorkerGrainBase<TState> : Grain where TState : cla
     /// </summary>
     public virtual Task<WorkerStatus> GetStatusAsync()
     {
-        lock (_statsLock)
-        {
-            return Task.FromResult(new WorkerStatus
-            {
-                IsRunning = _isRunning,
-                LastExecutionTime = _lastExecutionTime,
-                NextExecutionTime = _nextExecutionTime,
-                SuccessCount = _successCount,
-                FailureCount = _failureCount
-            });
-        }
+        return Task.FromResult(_executor.GetStatus());
     }
 
     /// <summary>
@@ -345,14 +218,7 @@ public abstract class StatefulWorkerGrainBase<TState> : Grain where TState : cla
     /// </summary>
     public virtual Task ResetStatisticsAsync()
     {
-        lock (_statsLock)
-        {
-            _successCount = 0;
-            _failureCount = 0;
-            _lastExecutionTime = null;
-        }
-
-        Logger.LogInformation("Statistics reset for worker grain {GrainId}", this.GetPrimaryKeyString());
+        _executor.ResetStatistics();
         return Task.CompletedTask;
     }
 }

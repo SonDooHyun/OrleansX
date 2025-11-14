@@ -16,6 +16,19 @@ namespace OrleansX.Client.Extensions;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
+    /// OrleansX Client를 기본 설정으로 등록합니다 (튜토리얼용).
+    /// </summary>
+    public static IServiceCollection AddOrleansXClient(this IServiceCollection services)
+    {
+        var defaultOptions = new OrleansClientOptions
+        {
+            ClusterId = "dev",
+            ServiceId = "OrleansXService"
+        };
+        return AddOrleansXClient(services, defaultOptions);
+    }
+
+    /// <summary>
     /// OrleansX Client를 등록합니다.
     /// </summary>
     public static IServiceCollection AddOrleansXClient(
